@@ -12,16 +12,9 @@ module.exports = {
     refreshToken,
     revokeToken,
     register,
-    verifyEmail,
-    forgotPassword,
-    validateResetToken,
-    resetPassword,
-    getAll,
-    getById,
-    create,
-    update,
-    delete: _delete
+    verifyEmail
 };
+
 // AUTH FUNCTION
 async function authenticate({ email, password, ipAddress }) {
     const account = await db.Account.scope('withHash').findOne({ where: { email } });
@@ -114,114 +107,7 @@ async function verifyEmail({ token }) {
     await account.save();
 }
 
-// FORGOT PASSWORD FUNCTION
-async function forgotPassword({ email }, origin) {
-    const account = await db.Account.findOne({ where: { email } });
-
-    // always return ok response to prevent email enumeration
-    if (!account) return;
-
-    // create reset token that expires after 24 hours
-    account.resetToken = randomTokenString();
-    account.resetTokenExpires = new Date(Date.now() + 24*60*60*1000);
-    await account.save();
-
-    // send email
-    await sendPasswordResetEmail(account, origin);
-}
-
-// VALIDATE RESET TOKEN FUNCTION
-async function validateResetToken({ token }) {
-    const account = await db.Account.findOne({
-        where: {
-            resetToken: token,
-            resetTokenExpires: { [Op.gt]: Date.now() }
-        }
-    });
-
-    if (!account) throw 'Invalid token';
-
-    return account;
-}
-
-// RESET PASSWORD FUNCTION
-async function resetPassword({ token, password }) {
-    const account = await validateResetToken({ token });
-
-    // update password and remove reset token
-    account.passwordHash = await hash(password);
-    account.passwordReset = Date.now();
-    account.resetToken = null;
-    await account.save();
-}
-// GET ALL ACCOUNTS
-async function getAll() {
-    const accounts = await db.Account.findAll();
-    return accounts.map(x => basicDetails(x));
-}
-
-// GET ACCOUNT BY ID
-async function getById(id) {
-    const account = await getAccount(id);
-    return basicDetails(account);
-}
-
-// CREATE ACCOUNT
-async function create(params) {
-    // validate
-    if (await db.Account.findOne({ where: { email: params.email } })) {
-        throw 'Email "' + params.email + '" is already registered';
-    }
-
-    const account = new db.Account(params);
-    account.verified = Date.now();
-
-    // hash password
-    account.passwordHash = await hash(params.password);
-
-    // save account
-    await account.save();
-
-    return basicDetails(account);
-}
-
-// UPDATE ACCOUNT
-async function update(id, params) {
-    const account = await getAccount(id);
-
-    // validate (if email was changed)
-    if (params.email && account.email !== params.email &&
-        await db.Account.findOne({ where: { email: params.email } })) {
-        throw 'Email "' + params.email + '" is already taken';
-    }
-
-    // hash password if it was entered
-    if (params.password) {
-        params.passwordHash = await hash(params.password);
-    }
-
-    // copy params to account and save
-    Object.assign(account, params);
-    account.updated = Date.now();
-    await account.save();
-
-    return basicDetails(account);
-}
-
-// DELETE ACCOUNT
-async function _delete(id) {
-    const account = await getAccount(id);
-    await account.destroy();
-}
-
 /** Helper Functions **/
-
-// Fetch account by ID
-async function getAccount(id) {
-    const account = await db.Account.findByPk(id);
-    if (!account) throw 'Account not found';
-    return account;
-}
 
 // Fetch refresh token
 async function getRefreshToken(token) {
@@ -307,26 +193,6 @@ async function sendAlreadyRegisteredEmail(email, origin) {
         subject: 'Sign-up Verification API - Email Already Registered',
         html: `<h4>Email Already Registered</h4>
                <p>Your email <strong>${email}</strong> is already registered.</p>
-               ${message}`
-    });
-}
-
-// Send Password Reset Email
-async function sendPasswordResetEmail(account, origin) {
-    let message;
-    if (origin) {
-        const resetUrl = `${origin}/account/reset-password?token=${account.resetToken}`;
-        message = `<p>Please click the below link to reset your password, the link will be valid for 1 day:</p>
-                   <p><a href="${resetUrl}">${resetUrl}</a></p>`;
-    } else {
-        message = `<p>Please use the below token to reset your password with the <code>/account/reset-password</code> api route:</p>
-                   <p><code>${account.resetToken}</code></p>`;
-    }
-
-    await sendEmail({
-        to: account.email,
-        subject: 'Sign-up Verification API – Reset Password',
-        html: `<h4>Reset Password Email</h4>
                ${message}`
     });
 }
